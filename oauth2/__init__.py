@@ -381,10 +381,10 @@ class Request(dict):
         query = urlparse.urlparse(self.url)[4]
         
         url_items = self._split_url_string(query).items()
-        non_oauth_url_items = list([(k, v) for k, v in url_items  if not k.startswith('oauth_')])
+        non_oauth_url_items = list([(k, v) for k, v in url_items  if not k in self])
         items.extend(non_oauth_url_items)
 
-        encoded_str = urllib.urlencode(sorted(items))
+        encoded_str = urllib.urlencode(sorted(items), True)
         # Encode signature parameters per Oauth Core 1.0 protocol
         # spec draft 7, section 3.6
         # (http://tools.ietf.org/html/draft-hammer-oauth-07#section-3.6)
@@ -508,7 +508,7 @@ class Request(dict):
         """Turn URL string into parameters."""
         parameters = parse_qs(param_str, keep_blank_values=False)
         for k, v in parameters.iteritems():
-            parameters[k] = urllib.unquote(v[0])
+            parameters[k] = sorted(list([urllib.unquote(w) for w in v]))
         return parameters
 
 
@@ -538,7 +538,8 @@ class Client(httplib2.Http):
         self.method = method
 
     def request(self, uri, method="GET", body=None, headers=None, 
-        redirections=httplib2.DEFAULT_MAX_REDIRECTS, connection_type=None):
+        redirections=httplib2.DEFAULT_MAX_REDIRECTS, connection_type=None,
+        callback_url=None, realm=''):
         DEFAULT_CONTENT_TYPE = 'application/x-www-form-urlencoded'
 
         if not isinstance(headers, dict):
@@ -547,10 +548,15 @@ class Client(httplib2.Http):
         is_multipart = method == 'POST' and headers.get('Content-Type', 
             DEFAULT_CONTENT_TYPE) != DEFAULT_CONTENT_TYPE
 
-        if body and method == "POST" and not is_multipart:
+        if body and (method == "POST" or method == 'PUT') and not is_multipart:
             parameters = dict(parse_qsl(body))
+            if callback_url != None:
+                parameters['oauth_callback'] = callback_url
         else:
-            parameters = None
+            if callback_url != None and not is_multipart:
+                parameters = {'oauth_callback': callback_url}
+            else:
+                parameters = None
 
         req = Request.from_consumer_and_token(self.consumer, 
             token=self.token, http_method=method, http_url=uri, 
@@ -558,17 +564,17 @@ class Client(httplib2.Http):
 
         req.sign_request(self.method, self.consumer, self.token)
 
-        if method == "POST":
+        if method == "POST" or method == "PUT":
             headers['Content-Type'] = headers.get('Content-Type', 
                 DEFAULT_CONTENT_TYPE)
             if is_multipart:
-                headers.update(req.to_header())
+                headers.update(req.to_header(realm))
             else:
                 body = req.to_postdata()
         elif method == "GET":
             uri = req.to_url()
         else:
-            headers.update(req.to_header())
+            headers.update(req.to_header(realm))
 
         return httplib2.Http.request(self, uri, method=method, body=body, 
             headers=headers, redirections=redirections, 
