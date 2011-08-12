@@ -590,7 +590,7 @@ class Server(object):
     resources with OAuth.
     """
 
-    timestamp_threshold = 300 # In seconds, five minutes.
+    timestamp_threshold = 100000 # In seconds, five minutes.
     version = VERSION
     signature_methods = None
 
